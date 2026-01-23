@@ -1,3 +1,4 @@
+import os
 import json
 import re
 
@@ -45,7 +46,9 @@ def extract_and_filter_prompt(json_file_path):
     return prompt, filtered_prompt
 
 def main():
-    json_file = r"c:\Users\陳洋\Desktop\stable-diffusion-webui\Api\test.json"
+    # 獲取腳本所在目錄
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    json_file = os.path.join(script_dir, "test.json")
     
     print("=" * 80)
     print("Prompt 過濾器 - 提取角色特徵")
@@ -65,8 +68,8 @@ def main():
     print(filtered_prompt)
     print()
     
-    # 將結果保存到文件
-    output_file = r"c:\Users\陳洋\Desktop\stable-diffusion-webui\Api\filtered_prompt.txt"
+    # 將結果保存到文件（使用相對路徑）
+    output_file = os.path.join(script_dir, "filtered_prompt.txt")
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write("=" * 80 + "\n")
         f.write("原始 Prompt:\n")

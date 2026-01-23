@@ -171,9 +171,17 @@ def main():
         print("步驟 4: 保存結果")
         print("-" * 70)
         
+        # 獲取腳本所在目錄
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        docs_dir = os.path.join(script_dir, "docs")
+        
+        # 確保 docs 目錄存在
+        if not os.path.exists(docs_dir):
+            os.makedirs(docs_dir)
+        
         # 生成帶時間戳的文件名
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"docs/character_design_{timestamp}.txt"
+        output_file = os.path.join(docs_dir, f"character_design_{timestamp}.txt")
         
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write("=" * 70 + "\n")
