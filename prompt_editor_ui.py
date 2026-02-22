@@ -20,7 +20,12 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import gradio as gr
-from PIL import Image
+import warnings
+import logging
+
+# 抑制 Windows asyncio proactor 的 ConnectionResetError 噪音
+logging.getLogger("asyncio").setLevel(logging.CRITICAL)
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="asyncio")
 
 from prompt_editor import (
     PromptEditor,
@@ -158,20 +163,22 @@ def run_edit_and_generate(
     """
     Phase 3 + 4 主 callback：
     AI 修改 prompt → SD 生圖 → 更新 Gallery / diff / history
-    使用 yield 分段回傳，讓圖片逐張出現在 Gallery
-    
-    Yields:
+
+    ⚠️ 故意設計為普通函數（非 generator），不使用 yield。
+    原因：Gradio 6 的 handle_streaming_diffs 在含 gr.State 的 generator outputs 中
+    會因 None 污染 last_diffs 導致前端 Svelte reconcile 崩潰。
+    改用 gr.Progress 提供進度回饋，輸出只在最後一次完整回傳。
+
+    Returns:
         (gallery_images, out_prompt, diff_text, history_list, history_df)
     """
 
     # ── 輸入驗證 ────────────────────────────────────────────────
     if not prompt_text.strip():
-        yield [], "", "❌ Prompt 不能為空，請先在左側輸入現有 Prompt", history, history_to_dataframe(history)
-        return
+        return [], "", "❌ Prompt 不能為空，請先在左側輸入現有 Prompt", history, history_to_dataframe(history)
 
     if not idea_text.strip():
-        yield [], "", "❌ 修改想法不能為空，請描述你想要的修改", history, history_to_dataframe(history)
-        return
+        return [], "", "❌ 修改想法不能為空，請描述你想要的修改", history, history_to_dataframe(history)
 
     attempts = int(attempts)
 
@@ -180,7 +187,7 @@ def run_edit_and_generate(
     if not sd_ok:
         print(f"⚠️  SD WebUI 未連線（{SD_URL}），將只進行 AI 修改，不生圖")
 
-    images_all: list = []          # 本輪所有成功生成的 PIL Image
+    images_all: list = []          # 本輪所有成功生成的路徑
     diff_parts: list = []          # 每次嘗試的 diff 文字
     last_modified_prompt: str = "" # 最後一次成功的修改 prompt
     total_images: int = 0
@@ -202,14 +209,6 @@ def run_edit_and_generate(
 
         if not modified_prompt:
             diff_parts.append(f"=== 嘗試 {attempt}/{attempts} ===\n❌ AI 修改失敗，已跳過")
-            # 每次嘗試後都 yield 一次，讓使用者看到進度
-            yield (
-                images_all.copy(),
-                last_modified_prompt,
-                "\n\n".join(diff_parts),
-                history,
-                history_to_dataframe(history),
-            )
             continue
 
         last_modified_prompt = modified_prompt
@@ -220,7 +219,6 @@ def run_edit_and_generate(
 
         # Step B：SD 生圖
         if not sd_ok:
-            # 重試連線
             sd_ok = editor.check_sd_connection()
 
         if sd_ok:
@@ -254,28 +252,19 @@ def run_edit_and_generate(
                     # 存檔（.png + .txt）
                     saved_paths = editor.save_images(gen_result, complete_metadata)
 
-                    # 將圖片讀入記憶體供 Gallery 顯示
+                    # 直接傳絕對路徑字串，配合 allowed_paths 讓 Gradio 提供服務
                     for path in saved_paths:
-                        try:
-                            images_all.append(Image.open(path))
+                        if os.path.isfile(path):
+                            images_all.append(path)
                             total_images += 1
-                        except Exception as e:
-                            print(f"⚠️  無法讀取圖片 {path}: {e}")
+                        else:
+                            print(f"⚠️  圖片路徑不存在：{path}")
                 else:
                     diff_parts[-1] += "\n❌ SD 生圖失敗"
             else:
                 diff_parts[-1] += "\n❌ 無法載入 test.json 配置"
         else:
             diff_parts[-1] += f"\n⚠️  SD 未連線，已略過生圖。可手動複製 Prompt 使用。"
-
-        # 每次嘗試完畢，即時 yield（讓圖片逐張出現）
-        yield (
-            images_all.copy(),
-            last_modified_prompt,
-            "\n\n".join(diff_parts),
-            history,
-            history_to_dataframe(history),
-        )
 
     # ── 更新歷史紀錄 ─────────────────────────────────────────────
     if last_modified_prompt:
@@ -289,7 +278,7 @@ def run_edit_and_generate(
 
     progress(1.0, desc="✅ 完成！")
 
-    yield (
+    return (
         images_all,
         last_modified_prompt,
         "\n\n".join(diff_parts),
@@ -475,4 +464,5 @@ if __name__ == "__main__":
         server_port=7861,
         inbrowser=True,       # 自動開啟瀏覽器
         show_error=True,
+        allowed_paths=[OUTPUT_DIR],   # 必須！Gradio 6 預設不允許服務外部目錄
     )
