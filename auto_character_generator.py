@@ -8,6 +8,7 @@ import random
 import requests
 import base64
 import io
+import time
 from datetime import datetime
 from PIL import Image
 from openai import OpenAI
@@ -56,12 +57,11 @@ class AutoCharacterGenerator:
         return random.choice(CHARACTER_TYPES)
     
     def design_character_with_ai(self, character_type):
-        """使用 Nvidia API 設計完整角色"""
+        """使用 Nvidia API 設計完整角色（支援多模型備用）"""
         
         # 從 .env 讀取 Nvidia API 配置
         api_key = os.getenv("NVIDIA_API_KEY")
         base_url = os.getenv("NVIDIA_BASE_URL")
-        model_name = os.getenv("NVIDIA_MODEL_NAME")
         
         if not api_key:
             print("❌ 錯誤：未找到 NVIDIA_API_KEY")
@@ -72,14 +72,35 @@ class AutoCharacterGenerator:
             print("❌ 錯誤：未找到 NVIDIA_BASE_URL")
             print("   請在 .env 文件中添加 NVIDIA_BASE_URL")
             return None
-            
-        if not model_name:
-            print("❌ 錯誤：未找到 NVIDIA_MODEL_NAME")
-            print("   請在 .env 文件中添加 NVIDIA_MODEL_NAME")
+        
+        # 從 .env 讀取主模型和備用模型
+        primary_model = os.getenv("NVIDIA_MODEL_NAME")
+        backup_models_str = os.getenv("NVIDIA_BACKUP_MODELS", "")
+        
+        # 建立模型列表（主模型 + 備用模型）
+        models = []
+        if primary_model:
+            models.append(primary_model)
+        
+        # 解析備用模型（用逗號或分號分隔）
+        if backup_models_str:
+            backup_models = [m.strip() for m in backup_models_str.replace(';', ',').split(',') if m.strip()]
+            models.extend(backup_models)
+        
+        if not models:
+            print("❌ 錯誤：未找到任何可用模型")
+            print("   請在 .env 文件中添加 NVIDIA_MODEL_NAME 或 NVIDIA_BACKUP_MODELS")
             return None
         
+        # 從 .env 讀取超時設定（秒），預設 60 秒
+        timeout = int(os.getenv("NVIDIA_API_TIMEOUT", "60"))
+        
         # 創建 OpenAI 客戶端（Nvidia API 兼容 OpenAI 接口）
-        client = OpenAI(base_url=base_url, api_key=api_key)
+        client = OpenAI(
+            base_url=base_url, 
+            api_key=api_key,
+            timeout=timeout  # 設定客戶端超時
+        )
         
         system_prompt = """你是一位專業的動漫角色設計師。需要創造一個全新的、完整的動漫角色。
 
@@ -112,25 +133,60 @@ class AutoCharacterGenerator:
 
 不要有任何額外的說明或標題，只要標籤列表。"""
 
-        try:
-            print(f"   正在使用 Nvidia API ({model_name}) 設計角色...")
+        # 顯示可用模型列表
+        print(f"   🤖 可用模型: {len(models)} 個")
+        for idx, model in enumerate(models, 1):
+            model_type = "主模型" if idx == 1 else f"備用{idx-1}"
+            print(f"      {idx}. {model} ({model_type})")
+        print()
+        
+        # 嘗試每個模型
+        for idx, model_name in enumerate(models, 1):
+            model_type = "主模型" if idx == 1 else f"備用模型 {idx-1}"
             
-            response = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.9,
-                top_p=0.95,
-                max_tokens=1500,
-                model=model_name
-            )
-            
-            return response.choices[0].message.content.strip()
-            
-        except Exception as e:
-            print(f"   ❌ API 調用錯誤: {e}")
-            return None
+            try:
+                print(f"   ⏳ 正在使用 {model_type}: {model_name}")
+                print(f"      超時設定: {timeout} 秒")
+                
+                start_time = time.time()
+                
+                response = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.9,
+                    top_p=0.95,
+                    max_tokens=1500,
+                    model=model_name
+                )
+                
+                elapsed_time = time.time() - start_time
+                
+                result = response.choices[0].message.content.strip()
+                
+                print(f"   ✅ 成功！回應時間: {elapsed_time:.2f} 秒")
+                print(f"      使用模型: {model_name}")
+                
+                return result
+                
+            except Exception as e:
+                elapsed_time = time.time() - start_time
+                error_msg = str(e)
+                
+                # 判斷錯誤類型
+                if "timeout" in error_msg.lower() or elapsed_time >= timeout:
+                    print(f"   ⏱️  超時！({elapsed_time:.2f} 秒)")
+                else:
+                    print(f"   ❌ 錯誤: {error_msg}")
+                
+                # 如果還有備用模型，繼續嘗試
+                if idx < len(models):
+                    print(f"   🔄 切換到下一個模型...")
+                    print()
+                else:
+                    print(f"   ❌ 所有模型都失敗了")
+                    return None
     
     def load_config_from_json(self, json_path):
         """從 JSON 載入配置"""

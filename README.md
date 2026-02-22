@@ -1,223 +1,107 @@
-# 動漫角色自動化抽獎設計助手 - Stable Diffusion AI
+# 🎨 動漫角色自動化抽獎設計助手與 Prompt 編輯器 - Stable Diffusion AI
 
-使用 GitHub Models GPT-4o 自動抽獎設計全新的動漫角色，包括完整的外貌、服裝、配飾等所有細節！
+這個專案是一套專為 Stable Diffusion 設計的自動化工具集，結合了高效能 AI 模型（Nvidia API / Gemini 3）與強大的提示詞（Prompt）處理能力。無論是從零啟動的「自動抽獎設計」，還是對現有提示詞進行「外科手術式精準修改」，都能輕鬆完成。
 
-## 🎲 核心功能
+---
 
-### 🎯 隨機抽獎系統
-- 從 5 種角色類型中隨機抽取
-- 清純少女、可愛少女、成熟女性、優雅女性、活潑少女
-- 每次運行都會獲得不同的驚喜角色！
+## 🎲 核心組件
 
-### 🎨 AI 完整角色設計
-- **外貌特徵**：髮色、髮型、眼睛顏色、身材等
-- **完整服裝**：上衣、下裝、外套、鞋子等所有細節
-- **配飾設計**：項鍊、耳環、手鐲、髮飾等
-- **場景氛圍**：背景、姿勢、表情、整體風格
+### 1. 🖥️ Gradio WebUI 提示詞編輯器 (`prompt_editor_ui.py`)
+為了解決傳統編輯 Prompt 的痛點，我們開發了直觀的 Web 介面。
+- **互動式編輯**：輸入現有 Prompt 與修改想法，AI 自動進行精準替換。
+- **LoRA 即時偵測**：自動識別並以彩色標籤顯示 Prompt 中的 LoRA，確保核心特徵不被誤刪。
+- **內建生成畫廊**：直接在瀏覽器預覽 Stable Diffusion 生成結果，無需頻繁切換資料夾。
+- **修改差異分析**：清楚顯示每個標籤（Tags）的新增、移除與保留狀態。
 
-### ⚡ 自動化流程
-1. 🎲 隨機抽取角色類型
-2. 🤖 AI 設計完整角色（所有細節）
-3. ✨ 自動添加質量增強標籤
-4. 💾 保存到 docs/ 資料夾（帶時間戳）
-5. ✅ 生成可直接使用的 Stable Diffusion Prompt
+### 2. 🎰 全自動角色抽獎生成器 (`auto_character_generator.py`)
+一鍵完成從「點子」到「美圖」的所有步驟。
+- **隨機抽獎系統**：從多種角色類型（清純、成熟、活潑等）中隨機抽取主題。
+- **AI 角色設計**：由 Llama-3.3-70B 或 Gemini 3 設計完整的外貌、服裝、配件與場景氛圍。
+- **批量生圖**：支援一次設置生成 1-20 個不同角色，適合大批量尋找靈感。
+- **自動化存檔**：按日期分類保存圖片、Prompt 紀錄與 AI 設計日誌。
+
+### 3. 🧪 提示詞過濾工具 (`filter_prompt_only.py`)
+- **零成本本地處理**：無需 API Key，快速提取角色特徵。
+- **標籤分類**：依據服裝、姿勢、背景等類別對 Raw Prompt 進行結構化分析。
+
+---
+
+## ⚡ 技術亮點
+
+### 🛡️ 多模型備用機制 (Multi-Model Fallback)
+為了確保 AI 設計過程不因網路或伺服器超時而中斷，系統實作了智慧型備用機制：
+- **超時門檻**：設定 30-120 秒超時自動判定。
+- **自動切換**：主模型（如 Llama-3.3）失敗或超時時，自動嘗試備用清單中的模型（如 Qwen3, Nemotron, GPT-OSS 等）。
+- **重試邏輯**：每個模型獨立重試，直到成功或清單用罄。
+
+### 🚀 Nvidia / Gemini 雙引擎支援
+- **Nvidia API**：提供極速且高品質的大型語言模型支援。
+- **Gemini 3 Flash**：做為強而有力的備援，具備出色的上下文理解能力。
+
+---
 
 ## 🚀 快速開始
 
-### 1. 配置 .env 文件
+### 1. 配置環境變數
 
-```powershell
-# 複製 .env.example 為 .env
-Copy-Item .env.example .env
+複製 `.env.example` 並更名為 `.env`，填入您的 API Key：
 
-# 編輯 .env 文件，添加您的 GitHub Token
-# GITHUB_TOKEN=ghp_your_token_here
+```dotenv
+# Nvidia API
+NVIDIA_API_KEY=your_nvidia_api_key_here
+
+# Gemini API (可選備用)
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Stable Diffusion WebUI 地址
+SD_WEBUI_URL=http://127.0.0.1:7860
 ```
 
-### 2. 安裝依賴
-
-```powershell
-pip install openai python-dotenv
-```
-
-### 3. 執行腳本
-
-```powershell
-# 完整功能：過濾 + AI 設計服裝
-python design_outfit.py
-
-# 或僅過濾功能
-python filter_prompt_only.py
-```
-
-## 📋 功能
-
-### 完整功能腳本 (`design_outfit.py`)
-
-- ✅ 從 `test.json` 提取 prompt 欄位
-- ✅ 過濾掉 19+ 個質量增強標籤
-- ✅ 保留角色特徵信息
-- ✅ 使用 GPT-4o 自動設計服裝
-- ✅ 生成 Stable Diffusion 格式的完整 prompt
-- ✅ 保存結果到 `outfit_design_result.txt`
-
-### 僅過濾功能 (`filter_prompt_only.py`)
-
-- ✅ 本地處理，無需 API
-- ✅ 提取並分析 prompt
-- ✅ 按類別分類標籤
-- ✅ 生成詳細分析報告
-- ✅ 保存結果到 `filtered_prompt.txt`
+---
 
 ## 📁 項目結構
 
 ```
 Api/
-├── .env                          # 配置文件（包含 Token）
-├── .env.example                  # 配置示例
-├── .gitignore                    # Git 忽略配置
-├── design_outfit.py              # 完整功能腳本
-├── filter_prompt_only.py         # 過濾功能腳本
-├── test.json                     # Stable Diffusion 配置
-├── docs/                         # 文檔
-│   ├── 快速開始指南.md           # 開始使用
-│   ├── README_outfit_designer.md # 詳細功能說明
-│   └── 使用說明.md               # 高級用法
-├── filtered_prompt.txt           # 過濾結果（運行後生成）
-└── outfit_design_result.txt      # AI 設計結果（運行後生成）
+├── prompt_editor_ui.py           # Gradio Web 介面入口
+├── auto_character_generator.py    # 批量自動生成腳本
+├── prompt_editor.py              # AI 提示詞修改核心邏輯
+├── filter_prompt_only.py         # 本地提示詞過濾工具
+├── test.json                     # Stable Diffusion 生成參數設定
+├── .env                          # 您的 API Key 與設定 (請勿上傳)
+├── docs/                         # 詳細更新說明與設計日誌
+└── outputs/                      # 生成結果存放處 (按日期自動分類)
 ```
-
-## 📖 文檔
-
-- **[快速開始指南](docs/快速開始指南.md)** - 5 分鐘快速上手
-- **[詳細說明](docs/README_outfit_designer.md)** - 完整功能介紹
-- **[使用說明](docs/使用說明.md)** - 進階功能和開發指南
-
-## 🔐 安全
-
-- ⚠️ **不要提交** `.env` 文件到 Git
-- ✅ 使用 `.env.example` 作為模板分享
-- ✅ `.env` 已添加到 `.gitignore`
-- ✅ Token 由 `python-dotenv` 安全加載
-
-## 📊 工作流
-
-```
-test.json
-   ↓
-[提取 prompt]
-   ↓
-[過濾質量標籤]
-   ↓
-[保留角色特徵]
-   ↓
-filtered_prompt.txt
-   ↓
-[GPT-4o API]
-   ↓
-[設計服裝]
-   ↓
-outfit_design_result.txt
-```
-
-## 🎨 示例
-
-### 輸入（原始 Prompt）
-
-```
-<lora:add_detail:1>,<lora:illustrious_masterpieces_v3:0.8>,absurdres,
-masterpiece,detailed eyes,perfect eyes,highly detailed face,best quality,
-<lora:rushia:1.5>,rushia_blue,green hair,short hair,red eyes,blue dress,
-short dress,wide_sleeves,lace,skull hair ornament,leg_garter,ring,
-light_blush,seductive_smile,standing,fantasy,gradient_background
-```
-
-### 過濾後（角色特徵）
-
-```
-<lora:rushia:1.5>,rushia_blue,green hair,short hair,red eyes,
-blue dress,short dress,wide_sleeves,lace,skull hair ornament,
-leg_garter,ring,light_blush,seductive_smile,standing,
-fantasy,gradient_background
-```
-
-### AI 設計的服裝
-
-```
-elegant gothic lolita dress, black lace bodice with silver embroidery,
-flowing layered purple skirt, multiple ruffled tiers, wide bell sleeves
-with lace trim, black and white apron overlay with decorative details,
-black thigh-high stockings with lace pattern, platform black boots,
-silver chain accessories, cross necklace, gothic jewelry set,
-skull hair clips, ribbon bow details, dramatic gothic aesthetic
-```
-
-## 💻 要求
-
-- Python 3.7+
-- GitHub Token（可从 https://github.com/settings/tokens 获取）
-- 网络连接（仅 API 模式需要）
-
-## 🛠️ 安装
-
-### 1. 获取 Token
-
-访问 https://github.com/settings/tokens:
-- 点击 "Generate new token" → "Generate new token (classic)"
-- 生成并复制 Token
-
-### 2. 配置
-
-```powershell
-# 编辑 .env 文件
-GITHUB_TOKEN=ghp_your_token_here
-```
-
-### 3. 安装包
-
-```powershell
-pip install openai python-dotenv
-```
-
-## 🎯 使用方法
-
-### 方法 1：自动设计服装（需要 Token）
-
-```powershell
-python design_outfit.py
-```
-
-### 方法 2：仅过滤（无需 Token）
-
-```powershell
-python filter_prompt_only.py
-```
-
-## ❓ 常见问题
-
-**Q: 为什么要使用 .env？**
-A: 安全存储敏感信息，不会暴露在命令历史中
-
-**Q: Token 暴露了怎么办？**
-A: 在 GitHub 设置中删除该 Token，生成新的
-
-**Q: 支持其他 AI 模型吗？**
-A: 可以修改代码集成其他 API
-
-**Q: 可以离线使用吗？**
-A: 可以，使用 `filter_prompt_only.py` 不需要网络
-
-## 📝 许可证
-
-MIT License
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
 
 ---
 
-**快速链接：**
-- [快速开始](docs/快速開始指南.md)
-- [完整文档](docs/使用說明.md)
-- [GitHub Token 获取](https://github.com/settings/tokens)
+## 🛠️ 建議工作流
+
+1. **大批量探索**：執行 `auto_character_generator.py` 進行大批量隨機設計，直到看到心儀的角色原型。
+2. **精準調優**：將心儀角色的 Prompt 放入 `prompt_editor_ui.py`。
+3. **AI 二次修改**：與 AI 對話（例如：「換成哥德蘿莉風格」、「加上眼鏡」），即時生成對比圖片。
+
+---
+
+## 📋 注意事項
+
+- ⚠️ **API 安全**：請務必將 `.env` 加入 `.ignore`，不要分享您的 Key。
+- 🔧 **SD 配置**：如果是遠端 SD WebUI，請確保 `SD_WEBUI_URL` 正確且防火牆已開啟。
+- 📦 **棄用說明**：原 GitHub Models API 配置已由 Nvidia API 取代。
+
+---
+
+## 📝 授權與貢獻
+本專案採用 MIT 授權。歡迎提交 Issue 或 Pull Request 分享您的標籤配置或改進建議！
+
+
+
+
+
+
+
+
+
+
+
+
