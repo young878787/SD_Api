@@ -31,6 +31,7 @@ from prompt_editor import (
     PromptEditor,
     extract_lora_tags,
     validate_lora_preservation,
+    setup_session_log,
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -40,6 +41,11 @@ from prompt_editor import (
 SD_URL = os.getenv("SD_WEBUI_URL", "http://127.0.0.1:7860")
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
 JSON_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test.json")
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+
+# 初始化 log（清除舊的，攔截 stdout/stderr）
+# 必須在 editor 初始化前呼叫，才能捕捉到 PromptEditor.__init__ 的輸出
+_log_path = setup_session_log(LOG_DIR)
 
 # 初始化 PromptEditor（模組載入時建立一次 session 資料夾）
 editor = PromptEditor(sd_url=SD_URL, output_dir=OUTPUT_DIR)
@@ -128,6 +134,74 @@ def build_sd_status_html(connected: bool, url: str) -> str:
         f'padding:4px 12px;border-radius:12px;font-size:13px;">'
         f'❌ SD 未連線｜{url}</span></div>'
     )
+
+
+def extract_prompt_from_txt(txt_path: str) -> str | None:
+    """
+    從 _save_image_metadata 產生的 .txt 檔案中解析出 Prompt 內容
+    格式範例：
+        📝 Prompt:
+           <actual prompt here>
+        （空行）
+        🌱 Seed: ...
+    """
+    try:
+        with open(txt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # 匹配「📝 Prompt:」到下一個空行或下一個 emoji 開頭的行之間的內容
+        match = re.search(
+            r'📝 Prompt:\n([\s\S]+?)(?:\n\n|\n🌱|\n📐|\n⚙️|\n🎯|\n🔧|\n📌|\n🤖)',
+            content
+        )
+        if match:
+            # 去除每行前面的縮排空格
+            raw = match.group(1)
+            lines = [line.lstrip() for line in raw.splitlines() if line.strip()]
+            return ' '.join(lines).strip().rstrip(',')
+        return None
+    except Exception as e:
+        print(f"⚠️  解析 txt 失敗 ({txt_path}): {e}")
+        return None
+
+
+def on_gallery_select(image_paths: list, evt: gr.SelectData) -> tuple:
+    """
+    Gallery 圖片被點選時，從對應 .txt 找出 prompt 並載入輸入框。
+
+    Returns:
+        (prompt_box_update, load_status_update)
+    """
+    if not image_paths:
+        return gr.update(), gr.update(value="⚠️ 尚無圖片路徑資訊")
+
+    idx = evt.index
+    if idx >= len(image_paths):
+        return gr.update(), gr.update(value=f"⚠️ 索引超出範圍（{idx} / {len(image_paths)}）")
+
+    img_path = image_paths[idx]
+    if not img_path or not os.path.isfile(img_path):
+        return gr.update(), gr.update(value=f"⚠️ 圖片路徑無效：{img_path}")
+
+    # 對應的 txt 和 img 檔名（e.g. 3.png → 3.txt）
+    txt_path = os.path.splitext(img_path)[0] + ".txt"
+    img_name = os.path.basename(img_path)
+    folder   = os.path.basename(os.path.dirname(img_path))
+
+    if not os.path.isfile(txt_path):
+        return (
+            gr.update(),
+            gr.update(value=f"⚠️ 找不到對應記錄檔：{txt_path}")
+        )
+
+    prompt = extract_prompt_from_txt(txt_path)
+    if not prompt:
+        return (
+            gr.update(),
+            gr.update(value=f"⚠️ 無法從 {txt_path} 解析 Prompt")
+        )
+
+    status_msg = f"✅ 已從 {folder}/{img_name} 載入 Prompt（共 {len(prompt.split(','))} 個標籤）"
+    return gr.update(value=prompt), gr.update(value=status_msg)
 
 
 def history_to_dataframe(history: list) -> list:
@@ -284,6 +358,7 @@ def run_edit_and_generate(
         "\n\n".join(diff_parts),
         history,
         history_to_dataframe(history),
+        images_all,             # ← 同步更新 image_paths_state
     )
 
 
@@ -308,7 +383,8 @@ def build_ui() -> gr.Blocks:
     ) as app:
 
         # ── State ──────────────────────────────────────────────
-        history_state = gr.State([])  # List[dict]
+        history_state    = gr.State([])   # List[dict]
+        image_paths_state = gr.State([])  # 本輪生成圖片的絕對路徑清單
 
         # ── 標題列 ─────────────────────────────────────────────
         with gr.Row(elem_classes="title-row"):
@@ -371,12 +447,23 @@ def build_ui() -> gr.Blocks:
                 gr.Markdown("### 🖼️ 輸出區")
 
                 gallery = gr.Gallery(
-                    label="本輪生成結果（可點擊放大）",
+                    label="本輪生成結果（點擊圖片可將 Prompt 載回輸入框）",
                     columns=3,
                     rows=2,
                     object_fit="contain",
                     height=320,
                     elem_id="main-gallery",
+                )
+
+                gallery_load_status = gr.Textbox(
+                    value="",
+                    label="",
+                    interactive=False,
+                    lines=1,
+                    max_lines=1,
+                    elem_id="gallery-load-status",
+                    show_label=False,
+                    placeholder="點擊上方圖片，可自動將該圖的 Prompt 載入左側輸入框",
                 )
 
                 out_prompt = gr.Textbox(
@@ -421,6 +508,13 @@ def build_ui() -> gr.Blocks:
             outputs=[sd_status],
         )
 
+        # Gallery 點擊：載入對應圖片的 Prompt
+        gallery.select(
+            fn=on_gallery_select,
+            inputs=[image_paths_state],
+            outputs=[prompt_box, gallery_load_status],
+        )
+
         # Phase 3 + 4：主執行按鈕
         # 執行時禁用按鈕，完成後解鎖
         run_btn.click(
@@ -430,7 +524,7 @@ def build_ui() -> gr.Blocks:
         ).then(
             fn=run_edit_and_generate,
             inputs=[prompt_box, idea_box, attempts_slider, history_state],
-            outputs=[gallery, out_prompt, diff_box, history_state, history_table],
+            outputs=[gallery, out_prompt, diff_box, history_state, history_table, image_paths_state],
         ).then(
             fn=lambda: gr.update(interactive=True, value="🎨  AI 修改並生圖"),
             inputs=[],
@@ -454,7 +548,8 @@ if __name__ == "__main__":
     print("=" * 65)
     print(f"📁 輸出資料夾：{editor.session_dir}")
     print(f"🌐 SD WebUI：{SD_URL}")
-    print(f"🚀 Gradio UI 啟動中，請稍候...")
+    print(f"� Log 檔案：{_log_path}")
+    print(f"�🚀 Gradio UI 啟動中，請稍候...")
     print()
 
     app = build_ui()
