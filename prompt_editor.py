@@ -8,6 +8,7 @@ import re
 import sys
 import json
 import random
+import threading
 import requests
 import base64
 import io
@@ -366,7 +367,6 @@ def get_multiline_input(prompt_text: str) -> str:
                 empty_count += 1
                 if empty_count >= 2:
                     break
-                lines.append(line)
             else:
                 empty_count = 0
                 lines.append(line)
@@ -408,74 +408,123 @@ class PromptEditor:
         os.makedirs(self.session_dir)
         print(f"📁 本次圖片資料夾：{self.session_dir}")
 
-        # 本 session 的圖片流水號
+        # 本 session 的圖片流水號（lock 保護多執行緒並行安全）
         self.image_counter = 0
+        self._counter_lock = threading.Lock()
+
+        # provider list 快取（避免每次 AI 呼叫重建 OpenAI client）
+        self._providers_cache: list | None = None
+
+        # 啟動時顯示已啟用的 AI 提供商（有 Key 才算啟用）
+        active = self._build_provider_list()
+        if active:
+            unique_labels = list(dict.fromkeys(p[3].split(" ")[0] for p in active))
+            print(f"🤖 AI 提供商：{' → '.join(unique_labels)}（共 {len(active)} 個模型）")
+        else:
+            print("⚠️  警告：未找到任何可用 AI 提供商，請確認 .env 設定")
+
+    # ── 提供商靜態設定表 ─────────────────────────────────────────
+    # key        : AI_PROVIDERS 中使用的識別名稱
+    # key_env    : API Key 的環境變數名
+    # base_env   : Base URL 的環境變數名
+    # default_base: 若 base_env 未設定時的預設值（None 代表必填）
+    # model_env  : 主模型的環境變數名
+    # backup_env : 備用模型清單的環境變數名（逗號或分號分隔）
+    # timeout_env: Timeout 的環境變數名
+    # label      : 顯示用的提供商名稱
+    _PROVIDER_CONFIGS: dict = {
+        "nvidia_api": {
+            "key_env":      "NVIDIA_API_KEY",
+            "base_env":     "NVIDIA_BASE_URL",
+            "default_base": None,                # Base URL 為必填
+            "model_env":    "NVIDIA_MODEL_NAME",
+            "backup_env":   "NVIDIA_BACKUP_MODELS",
+            "timeout_env":  "NVIDIA_API_TIMEOUT",
+            "label":        "Nvidia",
+        },
+        "open_router": {
+            "key_env":      "OPENROUTER_API_KEY",
+            "base_env":     "OPENROUTER_BASE_URL",
+            "default_base": "https://openrouter.ai/api/v1",
+            "model_env":    "OPENROUTER_MODEL_NAME",
+            "backup_env":   "OPENROUTER_BACKUP_MODELS",
+            "timeout_env":  "OPENROUTER_API_TIMEOUT",
+            "label":        "OpenRouter",
+        },
+        "gemini": {
+            "key_env":      "GEMINI_API_KEY",
+            "base_env":     "GEMINI_BASE_URL",
+            "default_base": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "model_env":    "GEMINI_MODEL_NAME",
+            "backup_env":   "GEMINI_BACKUP_MODELS",
+            "timeout_env":  "GEMINI_API_TIMEOUT",
+            "label":        "Gemini",
+        },
+    }
 
     def _build_provider_list(self) -> list:
         """
-        建立全域 provider 清單，格式為 [(client, timeout, model_name, label), ...]
+        建立 AI provider 清單，格式為 [(client, timeout, model_name, label), ...]
 
-        優先順序（Key 已填才加入清單，否則跳過）：
-          1. Gemini  → 若設定 GEMINI_API_KEY
-          2. Nvidia  → 若設定 NVIDIA_API_KEY（可切換為任意 Nvidia 平台上的模型）
+        優先順序由 .env 的 AI_PROVIDERS 決定（逗號分隔的識別名稱），
+        可用值：nvidia_api, open_router, gemini
+        僅啟用有填入 API Key 的提供商，其餘自動跳過。
 
-        思考型模型（如 step/step-3-5-flash）可直接將 NVIDIA_MODEL_NAME 改成對應
-        模型名稱即可透過 Nvidia API 使用，strip_thinking_blocks() 會
-        自動清除 <think>...</think> 區塊。
+        每個提供商都支援：
+          - 主模型（*_MODEL_NAME）
+          - 備用模型清單（*_BACKUP_MODELS，逗號或分號分隔）
+          → 主模型失敗時依序嘗試備用模型，再切換下一個提供商
+
+        思考型模型的 <think>...</think> 區塊會被 strip_thinking_blocks() 自動清除。
         """
+        if self._providers_cache is not None:
+            return self._providers_cache
+
+        # 讀取啟用清單，預設全開（向後相容）
+        enabled_str = os.getenv("AI_PROVIDERS", "nvidia_api,open_router,gemini").strip()
+        enabled_list = [p.strip().lower() for p in
+                        enabled_str.replace(';', ',').split(',') if p.strip()]
+
         providers = []
         timeout_default = 60
 
-        # ── Gemini ─────────────────────────────────────────────
-        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-        gemini_base = os.getenv("GEMINI_BASE_URL",
-                                 "https://generativelanguage.googleapis.com/v1beta/openai/")
-        gemini_timeout = int(os.getenv("GEMINI_API_TIMEOUT", str(timeout_default)))
+        for provider_id in enabled_list:
+            cfg = self._PROVIDER_CONFIGS.get(provider_id)
+            if cfg is None:
+                print(f"   ⚠️  AI_PROVIDERS 包含未知提供商：'{provider_id}'，已跳過")
+                continue
 
-        if gemini_key:
-            gemini_client = OpenAI(
-                base_url=gemini_base,
-                api_key=gemini_key,
-                timeout=gemini_timeout
+            api_key = os.getenv(cfg["key_env"], "").strip()
+            if not api_key:
+                continue  # Key 未填，靜默跳過
+
+            base_url = os.getenv(cfg["base_env"], cfg["default_base"] or "").strip()
+            if not base_url:
+                print(f"   ⚠️  {cfg['label']} 未設定 {cfg['base_env']}，已跳過")
+                continue
+
+            timeout = int(os.getenv(cfg["timeout_env"], str(timeout_default)))
+
+            client = OpenAI(
+                base_url=base_url,
+                api_key=api_key,
+                timeout=timeout,
             )
-            gemini_primary = os.getenv("GEMINI_MODEL_NAME", "gemini-3-flash-preview").strip()
-            gemini_backup_str = os.getenv("GEMINI_BACKUP_MODELS", "").strip()
 
-            gemini_models = [gemini_primary] if gemini_primary else []
-            if gemini_backup_str:
-                gemini_models += [m.strip() for m in
-                                   gemini_backup_str.replace(';', ',').split(',')
-                                   if m.strip()]
-            for i, m in enumerate(gemini_models):
-                label = "Gemini 主模型" if i == 0 else f"Gemini 備用 {i}"
-                providers.append((gemini_client, gemini_timeout, m, label))
+            primary_model = os.getenv(cfg["model_env"], "").strip()
+            backup_str    = os.getenv(cfg["backup_env"], "").strip()
 
-        # ── Nvidia ──────────────────────────────────────────
-        # NVIDIA_MODEL_NAME 可填入任意 Nvidia 平台上的模型名稱，
-        # 包含思考型（step/step-3-5-flash 等）和指令型（qwen3-next 等）。
-        # 思考型的 <think>...</think> 區塊會被 strip_thinking_blocks() 自動清除。
-        nvidia_key = os.getenv("NVIDIA_API_KEY", "").strip()
-        nvidia_base = os.getenv("NVIDIA_BASE_URL", "").strip()
-        nvidia_timeout = int(os.getenv("NVIDIA_API_TIMEOUT", str(timeout_default)))
+            models = [primary_model] if primary_model else []
+            if backup_str:
+                models += [m.strip() for m in
+                           backup_str.replace(';', ',').split(',') if m.strip()]
 
-        if nvidia_key and nvidia_base:
-            nvidia_client = OpenAI(
-                base_url=nvidia_base,
-                api_key=nvidia_key,
-                timeout=nvidia_timeout
-            )
-            nvidia_primary = os.getenv("NVIDIA_MODEL_NAME", "").strip()
-            nvidia_backup_str = os.getenv("NVIDIA_BACKUP_MODELS", "").strip()
+            for i, model_name in enumerate(models):
+                label = (f"{cfg['label']} 主模型" if i == 0
+                         else f"{cfg['label']} 備用 {i}")
+                providers.append((client, timeout, model_name, label))
 
-            nvidia_models = [nvidia_primary] if nvidia_primary else []
-            if nvidia_backup_str:
-                nvidia_models += [m.strip() for m in
-                                   nvidia_backup_str.replace(';', ',').split(',')
-                                   if m.strip()]
-            for i, m in enumerate(nvidia_models):
-                label = "Nvidia 主模型" if i == 0 else f"Nvidia 備用 {i}"
-                providers.append((nvidia_client, nvidia_timeout, m, label))
-
+        self._providers_cache = providers
         return providers
 
     def edit_prompt_with_ai(self, original_prompt: str, user_idea: str,
@@ -493,14 +542,11 @@ class PromptEditor:
             (修改後的完整 prompt, AI metadata 字典)
             失敗回傳 (None, None)
         """
-        try:
-            providers = self._build_provider_list()
-        except Exception as e:
-            print(f"❌ 初始化失敗: {e}")
-            return None, None
-
+        providers = self._build_provider_list()
         if not providers:
-            print("❌ 未設定任何 AI 提供商，請在 .env 設定 GEMINI_API_KEY 或 NVIDIA_API_KEY")
+            print("❌ 沒有可用的 AI 提供商。請檢查：")
+            print("   1. .env 的 AI_PROVIDERS 是否包含至少一個提供商（nvidia_api / open_router / gemini）")
+            print("   2. 對應的 API Key 是否已填入（如 NVIDIA_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY）")
             return None, None
 
         # 提取原始 LoRA 標籤，作為驗證基準
@@ -553,17 +599,16 @@ class PromptEditor:
         }
 
         for client, timeout, model_name, provider_label in providers:
+            start_time = time.time()
             try:
                 print(f"   ⏳ [{attempt_num}/{total_attempts}] {provider_label}: {model_name}（溫度 {temperature}）")
-
-                start_time = time.time()
 
                 # ── Log：AI 呼叫前，記錄完整輸入 ─────────────────
                 _log_detail(
                     f"AI_INPUT [嘗試 {attempt_num}/{total_attempts}]",
                     f"  Provider    : {provider_label}\n"
                     f"  Model       : {model_name}\n"
-                    f"  Temperature : {temperature} | top_p: 0.92 | max_tokens: 6000\n"
+                    f"  Temperature : {temperature} | top_p: 0.92 | max_tokens: 30000\n"
                     + "─" * 64 + " User Message\n"
                     + user_message + "\n"
                     + "─" * 64 + "\n"
@@ -576,7 +621,7 @@ class PromptEditor:
                     ],
                     temperature=temperature,
                     top_p=0.92,
-                    max_tokens=6000,
+                    max_tokens=30000,
                     model=model_name
                 )
                 elapsed = time.time() - start_time
@@ -690,12 +735,95 @@ class PromptEditor:
     # SD WebUI 生成相關
     # ───────────────────────────────────────────────────────────
 
+    def run_attempt_pipeline(
+        self,
+        original_prompt: str,
+        user_idea: str,
+        attempt_num: int,
+        total_attempts: int,
+        json_config_path: str,
+    ) -> dict:
+        """
+        單次嘗試的完整流程（thread-safe）：AI 修改 → 立即 SD 生圖
+
+        設計為可被 ThreadPoolExecutor 並行呼叫，各嘗試彼此獨立。
+        AI 回復一就立即開始生圖，不等其他層張。
+
+        Returns:
+            dict 包含：
+              attempt_num     : int
+              modified_prompt : str | None    (為 None 表示 AI 失敗)
+              ai_metadata     : dict | None
+              saved_paths     : list[str]     (已存圖片檔路徑)
+              sd_config       : dict | None   (用於日志/差異計算)
+              note            : str           (附加註解，如 SD 未連線、生圖失敗)
+        """
+        result: dict = {
+            "attempt_num":      attempt_num,
+            "modified_prompt":  None,
+            "ai_metadata":      None,
+            "saved_paths":      [],
+            "sd_config":        None,
+            "note":             "",
+        }
+
+        # ── Step 1：AI 修改 ──────────────────────────────
+        modified_prompt, ai_metadata = self.edit_prompt_with_ai(
+            original_prompt, user_idea, attempt_num, total_attempts
+        )
+        if not modified_prompt:
+            result["note"] = "❌ AI 修改失敗"
+            return result
+
+        result["modified_prompt"] = modified_prompt
+        result["ai_metadata"]     = ai_metadata
+
+        # ── Step 2：SD 生圖 ──────────────────────────────
+        if not self.check_sd_connection():
+            result["note"] = "⚠️  SD 未連線，已略過生圖。可手動複製 Prompt 使用。"
+            return result
+
+        config = self.load_json_config(json_config_path)
+        if not config:
+            result["note"] = "❌ 無法載入 JSON 配置"
+            return result
+
+        config["prompt"] = modified_prompt
+        config["seed"]   = random.randint(1000000000, 9999999999)
+        result["sd_config"] = config
+
+        gen_result = self.generate_image(config)
+        if gen_result and "images" in gen_result:
+            metadata = self._build_complete_metadata(modified_prompt, config, ai_metadata)
+            result["saved_paths"] = self.save_images(gen_result, metadata)
+        else:
+            result["note"] = "❌ SD 生圖失敗（AI prompt 已取得，可手動複製使用）"
+
+        return result
+
+    def _build_complete_metadata(self, modified_prompt: str, config: dict,
+                                  ai_metadata: dict | None) -> dict:
+        """從 AI 結果和 SD config 組裝圖片存檔用的 metadata 字典"""
+        return {
+            "prompt":       modified_prompt,
+            "seed":         config.get("seed", 0),
+            "width":        config.get("width", 512),
+            "height":       config.get("height", 512),
+            "steps":        config.get("steps", 28),
+            "sampler_name": config.get("sampler_name", "DPM++ 2M"),
+            "cfg_scale":    config.get("cfg_scale", 7.0),
+            "ai_model":     ai_metadata.get("model",       "Unknown") if ai_metadata else None,
+            "ai_provider":  ai_metadata.get("provider",    "Unknown") if ai_metadata else None,
+            "temperature":  ai_metadata.get("temperature",     0.7)   if ai_metadata else None,
+            "ai_timestamp": ai_metadata.get("timestamp",       "")    if ai_metadata else "",
+        }
+
     def check_sd_connection(self) -> bool:
         """檢查 SD WebUI 連線"""
         try:
             r = requests.get(f"{self.sd_url}/sdapi/v1/sd-models", timeout=5)
             return r.status_code == 200
-        except:
+        except Exception:
             return False
 
     def load_json_config(self, json_path: str) -> dict | None:
@@ -754,8 +882,11 @@ class PromptEditor:
                 if ',' in img_data:
                     img_data = img_data.split(',', 1)[1]
                 image = Image.open(io.BytesIO(base64.b64decode(img_data)))
-                self.image_counter += 1
-                filename = f"{self.image_counter}.png"
+                # 多執行緒並行時保護計數器的原子性
+                with self._counter_lock:
+                    self.image_counter += 1
+                    local_counter = self.image_counter
+                filename = f"{local_counter}.png"
                 filepath = os.path.join(self.session_dir, filename)
                 image.save(filepath, format='PNG')
                 saved.append(filepath)
@@ -763,7 +894,7 @@ class PromptEditor:
 
                 # ── 同步保存參數記錄到 .txt ──────────────────
                 if metadata:
-                    txt_filename = f"{self.image_counter}.txt"
+                    txt_filename = f"{local_counter}.txt"
                     txt_filepath = os.path.join(self.session_dir, txt_filename)
                     self._save_image_metadata(txt_filepath, metadata, filename)
 
@@ -999,21 +1130,9 @@ def main():
 
             gen_result = editor.generate_image(config)
             if gen_result:
-                # 準備完整的 metadata 用於保存
-                complete_metadata = {
-                    "prompt": modified_prompt,
-                    "seed": config['seed'],
-                    "width": config.get('width', 512),
-                    "height": config.get('height', 512),
-                    "steps": config.get('steps', 28),
-                    "sampler_name": config.get('sampler_name', 'DPM++ 2M'),
-                    "cfg_scale": config.get('cfg_scale', 7.0),
-                    "ai_model": ai_metadata.get('model', 'Unknown') if ai_metadata else None,
-                    "ai_provider": ai_metadata.get('provider', 'Unknown') if ai_metadata else None,
-                    "temperature": ai_metadata.get('temperature', 0.7) if ai_metadata else None,
-                    "ai_timestamp": ai_metadata.get('timestamp', '') if ai_metadata else ''
-                }
-                
+                complete_metadata = editor._build_complete_metadata(
+                    modified_prompt, config, ai_metadata
+                )
                 saved = editor.save_images(gen_result, complete_metadata)
                 print(f"   ✅ 嘗試 {attempt} 完成，生成 {len(saved)} 張圖片")
             else:

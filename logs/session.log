@@ -1422,3 +1422,67 @@ fantasy,head_tilt,looking_at_viewer,cowboy_shot,butterfly,handrail,avenue,in win
 修改後的完整 prompt（純英文逗號分隔標籤，無任何說明）
 [/FINAL_PROMPT]
 ────────────────────────────────────────────────────────────────
+   🎯 標記提取成功，已忽略 31 字元的推理內容
+   ✅ AI 回應成功！耗時: 24.33 秒
+   ✅ LoRA 標籤完整保留
+
+[16:20:25.406] >>> AI_OUTPUT [嘗試 4/4]
+  Provider        : OpenRouter 主模型
+  Model           : stepfun/step-3.5-flash:free
+  Elapsed         : 24.33s
+  Raw length      : 928 chars
+  Extraction      : [FINAL_PROMPT] marker
+  LoRA missing    : 0 個（已自動補回）
+──────────────────────────────────────────────────────────────── Final Prompt
+<lora:add_detail:1>,<lora:illustrious_masterpieces_v3:0.8>,<lora:best_of_ai_styles_noob-vpred-1.0_v2.217-edm2-pass-c:0.5>,<lora:noobai_ep11_stabilizer_v0.205_fp16:0.7>,<lora:9_NGNLStyle:0.7>,absurdres,masterpiece,newest,detailed eyes,detailed background,perfect eyes,highly detailed face,perfect lighting,anime coloring,detailed hands,detailed clothes,best quality,very aesthetic,NGNL Style,<lora:rushia:1.5>,rushia_blue,green hair,short hair,flat chest,red eyes,pupils,:>,bright_pupils,double bun,teen,(solo:1.3), red qipao, Chinese cheongsam, silk fabric, high thigh slit, exposed thighs, gold embroidery, black lace trim, metal frog buttons, mandarin collar, sleeveless, fitted silhouette, contrast accents, (skull hair ornament:1.1),(hair_flower:1.1),ring, light_blush,smile,(fox_shadow_puppet:1.1),standing, fantasy,head_tilt,looking_at_viewer,cowboy_shot,butterfly,handrail,avenue,in winter,
+────────────────────────────────────────────────────────────────
+   🎯 標記提取成功，已忽略 31 字元的推理內容
+   ✅ AI 回應成功！耗時: 36.75 秒
+   ✅ LoRA 標籤完整保留
+
+[16:20:37.823] >>> AI_OUTPUT [嘗試 1/4]
+  Provider        : OpenRouter 主模型
+  Model           : stepfun/step-3.5-flash:free
+  Elapsed         : 36.75s
+  Raw length      : 870 chars
+  Extraction      : [FINAL_PROMPT] marker
+  LoRA missing    : 0 個（已自動補回）
+──────────────────────────────────────────────────────────────── Final Prompt
+<lora:add_detail:1>,<lora:illustrious_masterpieces_v3:0.8>,<lora:best_of_ai_styles_noob-vpred-1.0_v2.217-edm2-pass-c:0.5>,<lora:noobai_ep11_stabilizer_v0.205_fp16:0.7>,<lora:9_NGNLStyle:0.7>,<lora:rushia:1.5>,absurdres,masterpiece,newest,detailed eyes,detailed background,perfect eyes,highly detailed face,perfect lighting,anime coloring,detailed hands,detailed clothes,best quality,very aesthetic,NGNL Style,rushia_blue,green hair,short hair,flat chest,red eyes,pupils,bright_pupils,double bun,teen,(solo:1.3),qipao dress,red qipao,silk qipao,mandarin collar,right side closure,knotted buttons,high slit,bare thighs,form-fitting silhouette,floral pattern,(skull hair ornament:1.1),(hair_flower:1.1),ring,light_blush,smile,(fox_shadow_puppet:1.1),standing,fantasy,head_tilt,looking_at_viewer,cowboy_shot,butterfly,handrail,avenue,in winter
+────────────────────────────────────────────────────────────────
+   🎯 標記提取成功，已忽略 31 字元的推理內容
+   ✅ AI 回應成功！耗時: 41.53 秒
+   ✅ LoRA 標籤完整保留
+
+[16:20:42.604] >>> AI_OUTPUT [嘗試 2/4]
+  Provider        : OpenRouter 主模型
+  Model           : stepfun/step-3.5-flash:free
+  Elapsed         : 41.53s
+  Raw length      : 852 chars
+  Extraction      : [FINAL_PROMPT] marker
+  LoRA missing    : 0 個（已自動補回）
+──────────────────────────────────────────────────────────────── Final Prompt
+<lora:add_detail:1>,<lora:illustrious_masterpieces_v3:0.8>,<lora:best_of_ai_styles_noob-vpred-1.0_v2.217-edm2-pass-c:0.5>,<lora:noobai_ep11_stabilizer_v0.205_fp16:0.7>,<lora:9_NGNLStyle:0.7>,absurdres,masterpiece,newest,detailed eyes,detailed background,perfect eyes,highly detailed face,perfect lighting,anime coloring,detailed hands,detailed clothes,best quality,very aesthetic,NGNL Style,<lora:rushia:1.5>,rushia_blue,green hair,short hair,flat chest,red eyes,pupils,:>,bright_pupils,double bun,teen,(solo:1.3),(cheongsam:1.2),red cheongsam,Chinese qipao,high collar,fitted dress,thigh-high slit,silk,gold embroidery,peony pattern,jade hairpin,(silk flower:1.1),jade ring,high heels,light_blush,smile,(fox_shadow_puppet:1.1),standing,fantasy,head_tilt,looking_at_viewer,cowboy_shot,butterfly,handrail,avenue,in winter,
+────────────────────────────────────────────────────────────────
+   ✅ 已保存: C:\Users\陳洋\Desktop\stable-diffusion-webui\Api\outputs\2026-02-25\edit3\21.png  (600x1328)
+   💾 已保存參數記錄: C:\Users\陳洋\Desktop\stable-diffusion-webui\Api\outputs\2026-02-25\edit3\21.txt
+   🎯 標記提取成功，已忽略 31 字元的推理內容
+   ✅ AI 回應成功！耗時: 88.76 秒
+   ✅ LoRA 標籤完整保留
+
+[16:21:29.840] >>> AI_OUTPUT [嘗試 3/4]
+  Provider        : OpenRouter 主模型
+  Model           : stepfun/step-3.5-flash:free
+  Elapsed         : 88.76s
+  Raw length      : 848 chars
+  Extraction      : [FINAL_PROMPT] marker
+  LoRA missing    : 0 個（已自動補回）
+──────────────────────────────────────────────────────────────── Final Prompt
+<lora:add_detail:1>,<lora:illustrious_masterpieces_v3:0.8>,<lora:best_of_ai_styles_noob-vpred-1.0_v2.217-edm2-pass-c:0.5>,<lora:noobai_ep11_stabilizer_v0.205_fp16:0.7>,<lora:9_NGNLStyle:0.7>,absurdres,masterpiece,newest,detailed eyes,detailed background,perfect eyes,highly detailed face,perfect lighting,anime coloring,detailed hands,detailed clothes,best quality,very aesthetic,NGNL Style,<lora:rushia:1.5>,rushia_blue,green hair,short hair,flat chest,red eyes,pupils,:>,bright_pupils,double bun,teen,(solo:1.3),red_qipao,chinese_cheongsam,high_collar,fitted_dress,high_slit,bare_thigh,silk_fabric,traditional_embroidery,frog_closures,(chinese_hairpin:1.1),(hair_flower:1.1),ring,light_blush,smile,(fox_shadow_puppet:1.1),standing,fantasy,head_tilt,looking_at_viewer,cowboy_shot,butterfly,handrail,avenue,in winter,
+────────────────────────────────────────────────────────────────
+   ✅ 已保存: C:\Users\陳洋\Desktop\stable-diffusion-webui\Api\outputs\2026-02-25\edit3\22.png  (600x1328)
+   💾 已保存參數記錄: C:\Users\陳洋\Desktop\stable-diffusion-webui\Api\outputs\2026-02-25\edit3\22.txt
+   ✅ 已保存: C:\Users\陳洋\Desktop\stable-diffusion-webui\Api\outputs\2026-02-25\edit3\23.png  (600x1328)
+   💾 已保存參數記錄: C:\Users\陳洋\Desktop\stable-diffusion-webui\Api\outputs\2026-02-25\edit3\23.txt
+   ✅ 已保存: C:\Users\陳洋\Desktop\stable-diffusion-webui\Api\outputs\2026-02-25\edit3\24.png  (600x1328)
+   💾 已保存參數記錄: C:\Users\陳洋\Desktop\stable-diffusion-webui\Api\outputs\2026-02-25\edit3\24.txt

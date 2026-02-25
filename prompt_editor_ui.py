@@ -11,9 +11,8 @@ Stable Diffusion Prompt 精準編輯器 - Gradio WebUI
 import os
 import sys
 import re
-import json
 import random
-import io
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 # 確保能 import 同目錄的 prompt_editor
@@ -30,7 +29,6 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, module="asyncio")
 from prompt_editor import (
     PromptEditor,
     extract_lora_tags,
-    validate_lora_preservation,
     setup_session_log,
 )
 
@@ -235,112 +233,79 @@ def run_edit_and_generate(
     progress=gr.Progress(track_tqdm=False),
 ):
     """
-    Phase 3 + 4 主 callback：
-    AI 修改 prompt → SD 生圖 → 更新 Gallery / diff / history
+    Phase 3 + 4 主 callback：並行送出所有嘗試，收到 AI 回覆就立即生圖。
 
-    ⚠️ 故意設計為普通函數（非 generator），不使用 yield。
-    原因：Gradio 6 的 handle_streaming_diffs 在含 gr.State 的 generator outputs 中
-    會因 None 污染 last_diffs 導致前端 Svelte reconcile 崩潰。
-    改用 gr.Progress 提供進度回饋，輸出只在最後一次完整回傳。
+    使用 ThreadPoolExecutor：
+      - 所有嘗試同時並行開呼，不互等
+      - 每個嘗試 AI 回應就立即開始生圖，不需等其他嘗試完成
+      - 以 as_completed 即時更新 Progress 進度
+      - 最後按嘗試編號排序一起輸出
 
-    Returns:
-        (gallery_images, out_prompt, diff_text, history_list, history_df)
+    ⚠️ 保留普通函數（非 generator），避免 Gradio 6 Svelte reconcile 崩潰。
     """
 
     # ── 輸入驗證 ────────────────────────────────────────────────
     if not prompt_text.strip():
-        return [], "", "❌ Prompt 不能為空，請先在左側輸入現有 Prompt", history, history_to_dataframe(history)
+        return [], "", "❌ Prompt 不能為空，請先在左側輸入現有 Prompt", history, history_to_dataframe(history), []
 
     if not idea_text.strip():
-        return [], "", "❌ 修改想法不能為空，請描述你想要的修改", history, history_to_dataframe(history)
+        return [], "", "❌ 修改想法不能為空，請描述你想要的修改", history, history_to_dataframe(history), []
 
     attempts = int(attempts)
 
-    # ── 檢查 SD 連線 ─────────────────────────────────────────────
-    sd_ok = editor.check_sd_connection()
-    if not sd_ok:
+    if not editor.check_sd_connection():
         print(f"⚠️  SD WebUI 未連線（{SD_URL}），將只進行 AI 修改，不生圖")
 
-    images_all: list = []          # 本輪所有成功生成的路徑
-    diff_parts: list = []          # 每次嘗試的 diff 文字
-    last_modified_prompt: str = "" # 最後一次成功的修改 prompt
-    total_images: int = 0
+    # ── 並行送出所有嘗試 ──────────────────────────────────────────
+    print(f"🚀 並行送出 {attempts} 次嘗試（AI + 生圖同步進行）")
+    raw_results: dict = {}
+    completed_count = 0
 
-    # ── 多嘗試迴圈 ───────────────────────────────────────────────
-    for attempt in range(1, attempts + 1):
-        progress(
-            (attempt - 1) / attempts,
-            desc=f"嘗試 {attempt}/{attempts}：AI 修改中..."
-        )
-
-        # Step A：AI 修改 prompt
-        modified_prompt, ai_metadata = editor.edit_prompt_with_ai(
-            prompt_text,
-            idea_text,
-            attempt_num=attempt,
-            total_attempts=attempts,
-        )
-
-        if not modified_prompt:
-            diff_parts.append(f"=== 嘗試 {attempt}/{attempts} ===\n❌ AI 修改失敗，已跳過")
-            continue
-
-        last_modified_prompt = modified_prompt
-        diff_parts.append(
-            f"=== 嘗試 {attempt}/{attempts} ===\n"
-            + get_diff_text(prompt_text, modified_prompt)
-        )
-
-        # Step B：SD 生圖
-        if not sd_ok:
-            sd_ok = editor.check_sd_connection()
-
-        if sd_ok:
+    with ThreadPoolExecutor(max_workers=attempts) as executor:
+        future_map = {
+            executor.submit(
+                editor.run_attempt_pipeline,
+                prompt_text, idea_text, i, attempts, JSON_CONFIG
+            ): i
+            for i in range(1, attempts + 1)
+        }
+        for future in as_completed(future_map):
+            completed_count += 1
+            r = future.result()
+            raw_results[r["attempt_num"]] = r
             progress(
-                (attempt - 0.5) / attempts,
-                desc=f"嘗試 {attempt}/{attempts}：SD 生圖中..."
+                completed_count / attempts,
+                desc=f"已完成 {completed_count}/{attempts} 次（嘗試 {r['attempt_num']}）"
             )
 
-            config = editor.load_json_config(JSON_CONFIG)
-            if config:
-                config["prompt"] = modified_prompt
-                config["seed"]   = random.randint(1000000000, 9999999999)
+    # ── 按嘗試編號排序，組裝輸出 ──────────────────────────────────
+    images_all: list = []
+    diff_parts: list = []
+    last_modified_prompt: str = ""
+    total_images: int = 0
 
-                gen_result = editor.generate_image(config)
+    for i in range(1, attempts + 1):
+        r = raw_results[i]
+        header = f"=== 嘗試 {i}/{attempts} ==="
 
-                if gen_result and "images" in gen_result:
-                    complete_metadata = {
-                        "prompt":       modified_prompt,
-                        "seed":         config["seed"],
-                        "width":        config.get("width", 512),
-                        "height":       config.get("height", 512),
-                        "steps":        config.get("steps", 28),
-                        "sampler_name": config.get("sampler_name", "DPM++ 2M"),
-                        "cfg_scale":    config.get("cfg_scale", 7.0),
-                        "ai_model":     ai_metadata.get("model",       "Unknown") if ai_metadata else None,
-                        "ai_provider":  ai_metadata.get("provider",    "Unknown") if ai_metadata else None,
-                        "temperature":  ai_metadata.get("temperature",     0.7)   if ai_metadata else None,
-                        "ai_timestamp": ai_metadata.get("timestamp",         "") if ai_metadata else "",
-                    }
+        if not r["modified_prompt"]:
+            diff_parts.append(f"{header}\n{r['note'] or '❌ AI 修改失敗，已跳過'}")
+            continue
 
-                    # 存檔（.png + .txt）
-                    saved_paths = editor.save_images(gen_result, complete_metadata)
+        last_modified_prompt = r["modified_prompt"]
+        diff_text = get_diff_text(prompt_text, r["modified_prompt"])
+        if r["note"]:
+            diff_text += f"\n{r['note']}"
+        diff_parts.append(f"{header}\n{diff_text}")
 
-                    # 直接傳絕對路徑字串，配合 allowed_paths 讓 Gradio 提供服務
-                    for path in saved_paths:
-                        if os.path.isfile(path):
-                            images_all.append(path)
-                            total_images += 1
-                        else:
-                            print(f"⚠️  圖片路徑不存在：{path}")
-                else:
-                    diff_parts[-1] += "\n❌ SD 生圖失敗"
+        for path in r["saved_paths"]:
+            if os.path.isfile(path):
+                images_all.append(path)
+                total_images += 1
             else:
-                diff_parts[-1] += "\n❌ 無法載入 test.json 配置"
-        else:
-            diff_parts[-1] += f"\n⚠️  SD 未連線，已略過生圖。可手動複製 Prompt 使用。"
+                print(f"⚠️  圖片路徑不存在：{path}")
 
-    # ── 更新歷史紀錄 ─────────────────────────────────────────────
+    # ── 更新歷史紀錄 ──────────────────────────────────────────────
     if last_modified_prompt:
         new_record = {
             "time":        datetime.now().strftime("%H:%M:%S"),
@@ -358,13 +323,9 @@ def run_edit_and_generate(
         "\n\n".join(diff_parts),
         history,
         history_to_dataframe(history),
-        images_all,             # ← 同步更新 image_paths_state
+        images_all,
     )
 
-
-# ═══════════════════════════════════════════════════════════════
-# Gradio Blocks UI 定義
-# ═══════════════════════════════════════════════════════════════
 
 def build_ui() -> gr.Blocks:
     with gr.Blocks(
