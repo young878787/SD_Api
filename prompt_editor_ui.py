@@ -5,13 +5,15 @@ Stable Diffusion Prompt 精準編輯器 - Gradio WebUI
 
 啟動方式：
     python prompt_editor_ui.py
-    瀏覽器開啟 http://127.0.0.1:7861
+    瀏覽器開啟 http://127.0.0.1:7801
 """
 
 import os
 import sys
 import re
 import random
+import argparse
+import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
@@ -36,7 +38,34 @@ from prompt_editor import (
 # 全域設定
 # ═══════════════════════════════════════════════════════════════
 
-SD_URL = os.getenv("SD_WEBUI_URL", "http://127.0.0.1:7860")
+DEFAULT_SD_URL = "http://127.0.0.1:7860"
+DEFAULT_UI_HOST = "127.0.0.1"
+DEFAULT_UI_PORT = 7801
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+        return value if value > 0 else default
+    except ValueError:
+        print(f"⚠️  環境變數 {name} 不是有效整數（{raw}），改用預設值 {default}")
+        return default
+
+
+SD_URL = os.getenv("SD_WEBUI_URL", DEFAULT_SD_URL)
+UI_HOST = os.getenv("PROMPT_EDITOR_HOST", DEFAULT_UI_HOST)
+UI_PORT = _env_int("PROMPT_EDITOR_PORT", DEFAULT_UI_PORT)
+AUTO_PORT = _env_bool("PROMPT_EDITOR_AUTO_PORT", True)
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
 JSON_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test.json")
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
@@ -45,8 +74,77 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 # 必須在 editor 初始化前呼叫，才能捕捉到 PromptEditor.__init__ 的輸出
 _log_path = setup_session_log(LOG_DIR)
 
-# 初始化 PromptEditor（模組載入時建立一次 session 資料夾）
+# 初始化 PromptEditor（允許在主程式入口依命令列參數重建）
 editor = PromptEditor(sd_url=SD_URL, output_dir=OUTPUT_DIR)
+
+
+def parse_runtime_args() -> argparse.Namespace:
+    """解析命令列參數，優先權高於環境變數。"""
+    parser = argparse.ArgumentParser(description="Stable Diffusion Prompt 精準編輯器")
+    parser.add_argument(
+        "--sd-url",
+        default=SD_URL,
+        help=f"Stable Diffusion WebUI API 位址（預設: {SD_URL}）",
+    )
+    parser.add_argument(
+        "--host",
+        default=UI_HOST,
+        help=f"Gradio 綁定主機（預設: {UI_HOST}）",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=UI_PORT,
+        help=f"Gradio 監聽埠（預設: {UI_PORT}）",
+    )
+    parser.add_argument(
+        "--auto-port",
+        action="store_true",
+        default=AUTO_PORT,
+        help="當指定埠被占用時，自動往後尋找可用埠",
+    )
+    parser.add_argument(
+        "--no-auto-port",
+        action="store_false",
+        dest="auto_port",
+        help="關閉自動換埠，埠被占用時直接報錯",
+    )
+    return parser.parse_args()
+
+
+def _is_port_available(host: str, port: int) -> bool:
+    """檢查指定 host:port 是否可綁定。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def resolve_launch_port(host: str, preferred_port: int, auto_port: bool, max_scan: int = 100) -> int:
+    """回傳可用埠；若 auto_port=False 則保留原埠。"""
+    if preferred_port <= 0:
+        print(f"⚠️  Port 必須是正整數，收到 {preferred_port}，改用預設 {DEFAULT_UI_PORT}")
+        preferred_port = DEFAULT_UI_PORT
+
+    if _is_port_available(host, preferred_port):
+        return preferred_port
+
+    if not auto_port:
+        return preferred_port
+
+    for offset in range(1, max_scan + 1):
+        candidate = preferred_port + offset
+        if candidate > 65535:
+            break
+        if _is_port_available(host, candidate):
+            print(f"⚠️  Port {preferred_port} 已被占用，自動改用 {candidate}")
+            return candidate
+
+    print(f"⚠️  在 {preferred_port} 起始往後掃描 {max_scan} 個埠仍找不到可用埠，將嘗試使用原始埠")
+    return preferred_port
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -504,20 +602,30 @@ def build_ui() -> gr.Blocks:
 # ═══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    args = parse_runtime_args()
+
+    SD_URL = args.sd_url.strip() or DEFAULT_SD_URL
+    UI_HOST = args.host.strip() or DEFAULT_UI_HOST
+    UI_PORT = resolve_launch_port(UI_HOST, args.port, args.auto_port)
+
+    # 依最新 SD_URL 重建 editor，確保連線檢查與生圖 API 目標一致
+    editor = PromptEditor(sd_url=SD_URL, output_dir=OUTPUT_DIR)
+
     print("=" * 65)
     print("✏️  Stable Diffusion Prompt 精準編輯器 - Gradio WebUI")
     print("=" * 65)
     print(f"📁 輸出資料夾：{editor.session_dir}")
     print(f"🌐 SD WebUI：{SD_URL}")
-    print(f"� Log 檔案：{_log_path}")
-    print(f"�🚀 Gradio UI 啟動中，請稍候...")
+    print(f"🧭 Gradio 監聽：http://{UI_HOST}:{UI_PORT}")
+    print(f"📝 Log 檔案：{_log_path}")
+    print(f"🚀 Gradio UI 啟動中，請稍候...")
     print()
 
     app = build_ui()
     app.queue()  # 啟用 queue，支援 yield 串流 + 並發請求保護
     app.launch(
-        server_name="127.0.0.1",
-        server_port=7861,
+        server_name=UI_HOST,
+        server_port=UI_PORT,
         inbrowser=True,       # 自動開啟瀏覽器
         show_error=True,
         allowed_paths=[OUTPUT_DIR],   # 必須！Gradio 6 預設不允許服務外部目錄

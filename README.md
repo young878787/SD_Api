@@ -55,6 +55,32 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 # Stable Diffusion WebUI 地址
 SD_WEBUI_URL=http://127.0.0.1:7860
+
+# Gradio 介面埠（可選）
+PROMPT_EDITOR_PORT=7801
+
+# 若埠被占用，自動往後找可用埠（可選，預設 true）
+PROMPT_EDITOR_AUTO_PORT=true
+```
+
+### 2. 啟動 Prompt 編輯器
+
+使用批次檔（互動輸入 SD_URL / Port）：
+
+```bat
+run_webui.bat
+```
+
+或直接用命令列參數（打包成 exe 後同樣可用）：
+
+```bat
+python prompt_editor_ui.py --sd-url "http://127.0.0.1:7860" --port 7801 --auto-port
+```
+
+如果你打包成 `prompt_editor_ui.exe`，對應指令是：
+
+```bat
+prompt_editor_ui.exe --sd-url "http://127.0.0.1:7860" --port 7801 --auto-port
 ```
 
 ---

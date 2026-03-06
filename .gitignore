@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 
+
 # IDE
 .vscode/
 .idea/
@@ -45,4 +46,4 @@ venv.bak/
 # 輸出文件
 *.txt
 outputs/
-logs/session.log
+logs/
