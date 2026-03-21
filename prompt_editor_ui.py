@@ -14,8 +14,17 @@ import re
 import random
 import argparse
 import socket
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from datetime import datetime
+
+# ── Windows asyncio 事件迴圈修正 ─────────────────────────────────
+# ProactorEventLoop (Windows 預設) 在處理 SSE / 長連線 chunked encoding
+# 時容易發生 ERR_INCOMPLETE_CHUNKED_ENCODING 與 ConnectionResetError。
+# SelectorEventLoop 相容性更好，必須在任何 asyncio 操作前設定。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # 確保能 import 同目錄的 prompt_editor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -359,6 +368,10 @@ def run_edit_and_generate(
     raw_results: dict = {}
     completed_count = 0
 
+    # 送出進度 0% 讓 SSE 連線立即活化，避免後續長時間 AI 等待期間 heartbeat 斷線
+    progress(0, desc=f"⏳ 等待 AI 回應中（0/{attempts} 完成）...")
+    _last_heartbeat = time.time()
+
     with ThreadPoolExecutor(max_workers=attempts) as executor:
         future_map = {
             executor.submit(
@@ -367,14 +380,42 @@ def run_edit_and_generate(
             ): i
             for i in range(1, attempts + 1)
         }
-        for future in as_completed(future_map):
-            completed_count += 1
-            r = future.result()
-            raw_results[r["attempt_num"]] = r
-            progress(
-                completed_count / attempts,
-                desc=f"已完成 {completed_count}/{attempts} 次（嘗試 {r['attempt_num']}）"
-            )
+
+        # ── SSE 主動保活迴圈 ────────────────────────────────────────
+        # 改用 wait(timeout=8) 代替 as_completed：
+        #   每 8 秒檢查一次，無論有無完成都會重新進入迴圈。
+        # 若 8 秒內沒有任何任務完成（AI 仍在運算中），
+        # 主動呼叫 progress() 強制寫入 SSE 佇列，避免以下問題：
+        #   ‧ ERR_INCOMPLETE_CHUNKED_ENCODING
+        #   ‧ TypeError: network error
+        #   ‧ Connection errored out (heartbeat / queue/data)
+        # 上述錯誤的共同根因是 Windows TCP stack 將長時間靜默的
+        # SSE 連線判定為閒置並回收，導致函數返回圖片時寫入失敗。
+        pending = set(future_map.keys())
+        while pending:
+            done, pending = wait(pending, timeout=8.0, return_when=FIRST_COMPLETED)
+
+            for future in done:
+                completed_count += 1
+                r = future.result()
+                raw_results[r["attempt_num"]] = r
+                _last_heartbeat = time.time()
+                progress(
+                    completed_count / attempts,
+                    desc=f"已完成 {completed_count}/{attempts} 次（嘗試 {r['attempt_num']}）"
+                )
+
+            # 仍有任務執行且距上次進度推送超過 8 秒 → 主動保活
+            if pending and (time.time() - _last_heartbeat) >= 8.0:
+                elapsed = int(time.time() - _last_heartbeat)
+                progress(
+                    completed_count / attempts,
+                    desc=(
+                        f"⏳ AI 生成中...（{completed_count}/{attempts} 已完成，"
+                        f"等待 {elapsed}s）"
+                    ),
+                )
+                _last_heartbeat = time.time()
 
     # ── 按嘗試編號排序，組裝輸出 ──────────────────────────────────
     images_all: list = []
@@ -622,11 +663,29 @@ if __name__ == "__main__":
     print()
 
     app = build_ui()
-    app.queue()  # 啟用 queue，支援 yield 串流 + 並發請求保護
+    # queue 設定：
+    #   default_concurrency_limit  — 限制同時執行的請求數，避免堆積
+    #   max_size                   — 佇列上限，超過直接拒絕避免記憶體爆炸
+    #   status_update_rate         — heartbeat 推送頻率（秒），預設 "auto"
+    #                                AI 耗時較長（30-60s）時調高頻率可防止前端誤判斷線
+    app.queue(
+        default_concurrency_limit=2,
+        max_size=20,
+        # 每 5 秒推送一次服務端心跳；
+        # 再配合 run_edit_and_generate 內的 progress() 主動保活，
+        # 雙重機制確保長時間 AI 運算（30-90s）期間 SSE 不斷線。
+        status_update_rate=5,
+    )
     app.launch(
         server_name=UI_HOST,
         server_port=UI_PORT,
         inbrowser=True,       # 自動開啟瀏覽器
         show_error=True,
         allowed_paths=[OUTPUT_DIR],   # 必須！Gradio 6 預設不允許服務外部目錄
+        # strict_cors=False：
+        #   Gradio 6 預設開啟嚴格 Origin 檢查，本機開發時會阻擋圖片載入
+        #   請求導致 ERR_INCOMPLETE_CHUNKED_ENCODING / Connection errored out。
+        #   關閉後允許 same-site 與 localhost 請求正常通過。
+        strict_cors=False,
+        max_threads=40,       # 預設 40，確保 ThreadPoolExecutor 並行 AI 請求有足夠的執行緒
     )

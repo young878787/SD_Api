@@ -2,7 +2,8 @@
 .env
 .env.local
 .env.*.local
-
+.agent
+.agents
 
 # IDE
 .vscode/
@@ -46,4 +47,3 @@ venv.bak/
 # 輸出文件
 *.txt
 outputs/
-logs/
