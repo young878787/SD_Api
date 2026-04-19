@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-white/70 dark:bg-[#151928]/80 backdrop-blur-[40px] border border-white/60 dark:border-white/10 shadow-[0_8px_32px_0_rgba(31,38,135,0.05)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.3)];
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  /* Light mode: Dawn anime sky pastel gradient */
+  background: 
+    radial-gradient(at 0% 0%, hsla(232, 100%, 94%, 1) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(338, 100%, 94%, 1) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, hsla(190, 100%, 92%, 1) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, hsla(252, 100%, 94%, 1) 0px, transparent 50%);
+  background-color: #f8fafc;
+  background-attachment: fixed;
+  color: #334155;
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+/* 增加網格裝飾 (動漫感的科技 UI 元素) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: 
+    linear-gradient(to right, rgba(0,0,0,0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0,0,0,0.02) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: linear-gradient(to bottom, black 20%, transparent 80%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    /* Dark mode: Starry night subtle glow */
+    background: 
+      radial-gradient(at 0% 0%, hsla(232, 60%, 15%, 1) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(338, 50%, 15%, 1) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(190, 60%, 15%, 1) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsla(252, 60%, 15%, 1) 0px, transparent 50%);
+    background-color: #0b0e14;
+    color: #e2e8f0;
+  }
+  body::before {
+    background-image: 
+      linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
+  }
+}
