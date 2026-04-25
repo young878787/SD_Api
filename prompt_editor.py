@@ -460,6 +460,15 @@ class PromptEditor:
             "timeout_env":  "GEMINI_API_TIMEOUT",
             "label":        "Gemini",
         },
+        "qwen": {
+            "key_env":      "DASHSCOPE_API_KEY",
+            "base_env":     "DASHSCOPE_BASE_URL",
+            "default_base": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            "model_env":    "QWEN_MODEL_NAME",
+            "backup_env":   "QWEN_BACKUP_MODELS",
+            "timeout_env":  "QWEN_API_TIMEOUT",
+            "label":        "Qwen",
+        },
     }
 
     def _build_provider_list(self) -> list:
@@ -481,7 +490,7 @@ class PromptEditor:
             return self._providers_cache
 
         # 讀取啟用清單，預設全開（向後相容）
-        enabled_str = os.getenv("AI_PROVIDERS", "nvidia_api,open_router,gemini").strip()
+        enabled_str = os.getenv("AI_PROVIDERS", "nvidia_api,open_router,gemini,qwen").strip()
         enabled_list = [p.strip().lower() for p in
                         enabled_str.replace(';', ',').split(',') if p.strip()]
 
@@ -545,8 +554,8 @@ class PromptEditor:
         providers = self._build_provider_list()
         if not providers:
             print("❌ 沒有可用的 AI 提供商。請檢查：")
-            print("   1. .env 的 AI_PROVIDERS 是否包含至少一個提供商（nvidia_api / open_router / gemini）")
-            print("   2. 對應的 API Key 是否已填入（如 NVIDIA_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY）")
+            print("   1. .env 的 AI_PROVIDERS 是否包含至少一個提供商（nvidia_api / open_router / gemini / qwen）")
+            print("   2. 對應的 API Key 是否已填入（如 NVIDIA_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY / DASHSCOPE_API_KEY）")
             return None, None
 
         # 提取原始 LoRA 標籤，作為驗證基準

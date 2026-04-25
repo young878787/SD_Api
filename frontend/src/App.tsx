@@ -10,7 +10,7 @@ export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
-const API_BASE = 'http://127.0.0.1:8877';
+const API_BASE = `http://127.0.0.1:${import.meta.env.VITE_BACKEND_PORT || 9999}`;
 
 function extractLoras(prompt: string) {
   const regex = /<lora:([^:>]+)[^>]*>/g;

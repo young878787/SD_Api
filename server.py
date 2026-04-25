@@ -2,12 +2,12 @@ import os
 import sys
 
 # 強制將標準輸出切換為 UTF-8，避免 Windows 預設的 cp950 導致印出表情符號時報錯
-if sys.stdout.encoding.lower() != 'utf-8':
+if getattr(sys.stdout, 'encoding', None) and sys.stdout.encoding.lower() != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except AttributeError:
         pass
-if sys.stderr.encoding.lower() != 'utf-8':
+if getattr(sys.stderr, 'encoding', None) and sys.stderr.encoding.lower() != 'utf-8':
     try:
         sys.stderr.reconfigure(encoding='utf-8')
     except AttributeError:
@@ -46,12 +46,14 @@ editor = PromptEditor(sd_url=DEFAULT_SD_URL, output_dir=OUTPUT_DIR)
 
 app = FastAPI(title="Prompt Editor API")
 
-# 允許 React 前端跨網域存取 (開發時 Vite 預設用 5173, 以及 8987)
+VITE_PORT = int(os.getenv("VITE_PORT", "8877"))
+
+# 允許 React 前端跨網域存取
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:8987",
-        "http://127.0.0.1:8987",
+        f"http://localhost:{VITE_PORT}",
+        f"http://127.0.0.1:{VITE_PORT}",
         "*"
     ],
     allow_credentials=True,
@@ -146,6 +148,7 @@ async def generate(req: Request):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
+    backend_port = int(os.getenv("BACKEND_PORT", "9999"))
     print(f"啟動 FastAPI 伺服器...")
-    print(f"Swagger API 文件請見: http://127.0.0.1:8877/docs")
-    uvicorn.run("server:app", host="127.0.0.1", port=8877, reload=False)
+    print(f"Swagger API 文件請見: http://127.0.0.1:{backend_port}/docs")
+    uvicorn.run("server:app", host="127.0.0.1", port=backend_port, reload=False)
