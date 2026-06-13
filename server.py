@@ -27,7 +27,7 @@ import uvicorn
 # 確保能 import 同目錄的 prompt_editor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from prompt_editor import PromptEditor, setup_session_log
+from prompt_editor import PromptEditor, setup_session_log, _log_detail
 
 # ═══════════════════════════════════════════════════════════════
 # 全域設定
@@ -46,7 +46,7 @@ editor = PromptEditor(sd_url=DEFAULT_SD_URL, output_dir=OUTPUT_DIR)
 
 app = FastAPI(title="Prompt Editor API")
 
-VITE_PORT = int(os.getenv("VITE_PORT", "8877"))
+VITE_PORT = int(os.getenv("VITE_PORT", "15002"))
 
 # 允許 React 前端跨網域存取
 app.add_middleware(
@@ -91,6 +91,18 @@ async def generate(req: Request):
     prompt_text = body.get("prompt", "")
     idea_text = body.get("idea", "")
     attempts = int(body.get("attempts", 1))
+
+    # 記錄用戶輸入到 session log
+    from datetime import datetime as _dt
+    _log_detail(
+        f"USER_INPUT [{_dt.now().strftime('%Y-%m-%d %H:%M:%S')}]",
+        f"  Attempts : {attempts}\n"
+        + "─" * 64 + " Prompt\n"
+        + (prompt_text or "（空）") + "\n"
+        + "─" * 64 + " Idea\n"
+        + (idea_text or "（空）") + "\n"
+        + "─" * 64 + "\n"
+    )
     
     async def event_generator():
         yield f"data: {json.dumps({'type': 'progress', 'completed': 0, 'total': attempts, 'message': '⏳ 等待 AI 回應中...'})}\n\n"
@@ -148,7 +160,7 @@ async def generate(req: Request):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
-    backend_port = int(os.getenv("BACKEND_PORT", "9999"))
+    backend_port = int(os.getenv("BACKEND_PORT", "15001"))
     print(f"啟動 FastAPI 伺服器...")
     print(f"Swagger API 文件請見: http://127.0.0.1:{backend_port}/docs")
     uvicorn.run("server:app", host="127.0.0.1", port=backend_port, reload=False)

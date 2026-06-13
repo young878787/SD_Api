@@ -1,11 +1,6 @@
 """
-Stable Diffusion Prompt 精準編輯器 - Gradio WebUI
-基於 prompt_editor.py 的 PromptEditor class，包一層 Gradio 介面
-原 CLI 版本 (prompt_editor.py) 保留不動，可繼續獨立使用
-
-啟動方式：
-    python prompt_editor_ui.py
-    瀏覽器開啟 http://127.0.0.1:7801
+Stable Diffusion Prompt 精準編輯器的 Gradio 介面。
+可直接以 `python prompt_editor_ui.py` 啟動。
 """
 
 import os
@@ -19,21 +14,19 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from datetime import datetime
 
-# ── Windows asyncio 事件迴圈修正 ─────────────────────────────────
-# ProactorEventLoop (Windows 預設) 在處理 SSE / 長連線 chunked encoding
-# 時容易發生 ERR_INCOMPLETE_CHUNKED_ENCODING 與 ConnectionResetError。
-# SelectorEventLoop 相容性更好，必須在任何 asyncio 操作前設定。
+# Windows 預設的 ProactorEventLoop 對 SSE / 長連線較不穩定。
+# 改用 SelectorEventLoop 可降低 ERR_INCOMPLETE_CHUNKED_ENCODING 與斷線噪音。
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# 確保能 import 同目錄的 prompt_editor
+# 讓同目錄的 prompt_editor 可直接被 import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import gradio as gr
 import warnings
 import logging
 
-# 抑制 Windows asyncio proactor 的 ConnectionResetError 噪音
+# 壓低 asyncio 在 Windows 上常見的預期性斷線噪音
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="asyncio")
 
@@ -79,16 +72,16 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
 JSON_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test.json")
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
-# 初始化 log（清除舊的，攔截 stdout/stderr）
-# 必須在 editor 初始化前呼叫，才能捕捉到 PromptEditor.__init__ 的輸出
+# 初始化 session log，並攔截 stdout / stderr
+# 要先做這一步，才能完整記錄 PromptEditor.__init__ 的輸出
 _log_path = setup_session_log(LOG_DIR)
 
-# 初始化 PromptEditor（允許在主程式入口依命令列參數重建）
+# 預設 editor，主程式入口可依 CLI 參數重建
 editor = PromptEditor(sd_url=SD_URL, output_dir=OUTPUT_DIR)
 
 
 def parse_runtime_args() -> argparse.Namespace:
-    """解析命令列參數，優先權高於環境變數。"""
+    """解析命令列參數；優先於環境變數。"""
     parser = argparse.ArgumentParser(description="Stable Diffusion Prompt 精準編輯器")
     parser.add_argument(
         "--sd-url",
@@ -122,7 +115,7 @@ def parse_runtime_args() -> argparse.Namespace:
 
 
 def _is_port_available(host: str, port: int) -> bool:
-    """檢查指定 host:port 是否可綁定。"""
+    """檢查指定的 host:port 是否可綁定。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -133,7 +126,7 @@ def _is_port_available(host: str, port: int) -> bool:
 
 
 def resolve_launch_port(host: str, preferred_port: int, auto_port: bool, max_scan: int = 100) -> int:
-    """回傳可用埠；若 auto_port=False 則保留原埠。"""
+    """回傳可用埠；`auto_port=False` 時保留原埠。"""
     if preferred_port <= 0:
         print(f"⚠️  Port 必須是正整數，收到 {preferred_port}，改用預設 {DEFAULT_UI_PORT}")
         preferred_port = DEFAULT_UI_PORT
@@ -162,7 +155,7 @@ def resolve_launch_port(host: str, preferred_port: int, auto_port: bool, max_sca
 
 def get_diff_text(original: str, modified: str) -> str:
     """
-    將 prompt 差異轉成純文字字串（供 Gradio Textbox 顯示，不輸出 ANSI 顏色碼）
+    將 prompt 差異整理成純文字，供 Gradio Textbox 顯示。
     """
     original_tags = [t.strip() for t in original.split(',') if t.strip()]
     modified_tags  = [t.strip() for t in modified.split(',') if t.strip()]
@@ -193,7 +186,7 @@ def get_diff_text(original: str, modified: str) -> str:
 
 
 def build_lora_badges_html(prompt_text: str) -> str:
-    """根據 prompt 中的 LoRA 標籤，回傳彩色 badge HTML"""
+    """依 prompt 中的 LoRA 標籤產生彩色 badge HTML。"""
     loras = extract_lora_tags(prompt_text)
 
     if not loras:
@@ -225,7 +218,7 @@ def build_lora_badges_html(prompt_text: str) -> str:
 
 
 def build_sd_status_html(connected: bool, url: str) -> str:
-    """回傳 SD 連線狀態的彩色 badge HTML"""
+    """回傳 SD 連線狀態 badge HTML。"""
     if connected:
         return (
             f'<div style="text-align:right;">'
@@ -243,7 +236,8 @@ def build_sd_status_html(connected: bool, url: str) -> str:
 
 def extract_prompt_from_txt(txt_path: str) -> str | None:
     """
-    從 _save_image_metadata 產生的 .txt 檔案中解析出 Prompt 內容
+    從 `_save_image_metadata` 產生的 .txt 檔中擷取 Prompt 區塊。
+
     格式範例：
         📝 Prompt:
            <actual prompt here>
@@ -253,13 +247,13 @@ def extract_prompt_from_txt(txt_path: str) -> str | None:
     try:
         with open(txt_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        # 匹配「📝 Prompt:」到下一個空行或下一個 emoji 開頭的行之間的內容
+        # 擷取 Prompt 與下一個區塊之間的內容
         match = re.search(
             r'📝 Prompt:\n([\s\S]+?)(?:\n\n|\n🌱|\n📐|\n⚙️|\n🎯|\n🔧|\n📌|\n🤖)',
             content
         )
         if match:
-            # 去除每行前面的縮排空格
+            # 去掉每行前導縮排
             raw = match.group(1)
             lines = [line.lstrip() for line in raw.splitlines() if line.strip()]
             return ' '.join(lines).strip().rstrip(',')
@@ -310,7 +304,7 @@ def on_gallery_select(image_paths: list, evt: gr.SelectData) -> tuple:
 
 
 def history_to_dataframe(history: list) -> list:
-    """將 history list of dict 轉換為 Dataframe 用的 list of list"""
+    """將 history dict list 轉成 Dataframe 用的 list。"""
     return [
         [r["time"], r["idea"], r["prompt_head"], r["image_count"]]
         for r in history
@@ -363,12 +357,12 @@ def run_edit_and_generate(
     if not editor.check_sd_connection():
         print(f"⚠️  SD WebUI 未連線（{SD_URL}），將只進行 AI 修改，不生圖")
 
-    # ── 並行送出所有嘗試 ──────────────────────────────────────────
+    # 同步並行送出所有嘗試
     print(f"🚀 並行送出 {attempts} 次嘗試（AI + 生圖同步進行）")
     raw_results: dict = {}
     completed_count = 0
 
-    # 送出進度 0% 讓 SSE 連線立即活化，避免後續長時間 AI 等待期間 heartbeat 斷線
+    # 先推一次進度，讓 SSE 連線立即活化
     progress(0, desc=f"⏳ 等待 AI 回應中（0/{attempts} 完成）...")
     _last_heartbeat = time.time()
 
@@ -381,16 +375,7 @@ def run_edit_and_generate(
             for i in range(1, attempts + 1)
         }
 
-        # ── SSE 主動保活迴圈 ────────────────────────────────────────
-        # 改用 wait(timeout=8) 代替 as_completed：
-        #   每 8 秒檢查一次，無論有無完成都會重新進入迴圈。
-        # 若 8 秒內沒有任何任務完成（AI 仍在運算中），
-        # 主動呼叫 progress() 強制寫入 SSE 佇列，避免以下問題：
-        #   ‧ ERR_INCOMPLETE_CHUNKED_ENCODING
-        #   ‧ TypeError: network error
-        #   ‧ Connection errored out (heartbeat / queue/data)
-        # 上述錯誤的共同根因是 Windows TCP stack 將長時間靜默的
-        # SSE 連線判定為閒置並回收，導致函數返回圖片時寫入失敗。
+        # 每 8 秒檢查一次，必要時主動刷新 SSE 心跳。
         pending = set(future_map.keys())
         while pending:
             done, pending = wait(pending, timeout=8.0, return_when=FIRST_COMPLETED)
@@ -405,7 +390,7 @@ def run_edit_and_generate(
                     desc=f"已完成 {completed_count}/{attempts} 次（嘗試 {r['attempt_num']}）"
                 )
 
-            # 仍有任務執行且距上次進度推送超過 8 秒 → 主動保活
+            # 任務還沒跑完就補一個心跳，避免前端誤判斷線
             if pending and (time.time() - _last_heartbeat) >= 8.0:
                 elapsed = int(time.time() - _last_heartbeat)
                 progress(
@@ -417,7 +402,7 @@ def run_edit_and_generate(
                 )
                 _last_heartbeat = time.time()
 
-    # ── 按嘗試編號排序，組裝輸出 ──────────────────────────────────
+    # 依嘗試編號排序並組裝輸出
     images_all: list = []
     diff_parts: list = []
     last_modified_prompt: str = ""
@@ -444,7 +429,7 @@ def run_edit_and_generate(
             else:
                 print(f"⚠️  圖片路徑不存在：{path}")
 
-    # ── 更新歷史紀錄 ──────────────────────────────────────────────
+    # 更新歷史紀錄
     if last_modified_prompt:
         new_record = {
             "time":        datetime.now().strftime("%H:%M:%S"),
@@ -482,11 +467,11 @@ def build_ui() -> gr.Blocks:
         """,
     ) as app:
 
-        # ── State ──────────────────────────────────────────────
+        # 狀態
         history_state    = gr.State([])   # List[dict]
         image_paths_state = gr.State([])  # 本輪生成圖片的絕對路徑清單
 
-        # ── 標題列 ─────────────────────────────────────────────
+        # 標題列
         with gr.Row(elem_classes="title-row"):
             gr.Markdown("## ✏️ Stable Diffusion Prompt 精準編輯器")
             sd_status = gr.HTML(
@@ -497,10 +482,10 @@ def build_ui() -> gr.Blocks:
 
         gr.Markdown("---")
 
-        # ── 主內容列 ───────────────────────────────────────────
+        # 主內容
         with gr.Row(equal_height=False):
 
-            # ── 左欄：輸入區 （scale=1） ───────────────────────
+            # 左欄：輸入區
             with gr.Column(scale=1, min_width=320):
                 gr.Markdown("### 📝 輸入區")
 
@@ -542,7 +527,7 @@ def build_ui() -> gr.Blocks:
                     "💡 提示：生圖期間按鈕會禁用，完成後自動解鎖</div>"
                 )
 
-            # ── 右欄：輸出區 （scale=2） ───────────────────────
+            # 右欄：輸出區
             with gr.Column(scale=2, min_width=480):
                 gr.Markdown("### 🖼️ 輸出區")
 
@@ -581,7 +566,7 @@ def build_ui() -> gr.Blocks:
                     elem_id="diff-box",
                 )
 
-        # ── 歷史紀錄 Accordion ────────────────────────────────
+        # 歷史紀錄
         with gr.Accordion("🕐 修改歷史（點擊展開）", open=False):
             history_table = gr.Dataframe(
                 headers=["時間", "修改想法", "Prompt 摘要（前 80 字）", "生成圖片數"],
@@ -590,33 +575,30 @@ def build_ui() -> gr.Blocks:
                 wrap=True,
             )
 
-        # ═══════════════════════════════════════════════════════
         # 事件綁定
-        # ═══════════════════════════════════════════════════════
 
-        # Phase 2：Prompt 輸入後即時偵測 LoRA
+        # Prompt 輸入後即時偵測 LoRA
         prompt_box.change(
             fn=on_prompt_change,
             inputs=[prompt_box],
             outputs=[lora_display],
         )
 
-        # Phase 5：重新檢查 SD 連線
+        # 重新檢查 SD 連線
         refresh_sd_btn.click(
             fn=on_refresh_sd_status,
             inputs=[],
             outputs=[sd_status],
         )
 
-        # Gallery 點擊：載入對應圖片的 Prompt
+        # 點擊圖片時載入對應 Prompt
         gallery.select(
             fn=on_gallery_select,
             inputs=[image_paths_state],
             outputs=[prompt_box, gallery_load_status],
         )
 
-        # Phase 3 + 4：主執行按鈕
-        # 執行時禁用按鈕，完成後解鎖
+        # 主執行按鈕：執行時停用，完成後恢復
         run_btn.click(
             fn=lambda: gr.update(interactive=False, value="⏳ 執行中，請稍候..."),
             inputs=[],
@@ -638,9 +620,7 @@ def build_ui() -> gr.Blocks:
     return app
 
 
-# ═══════════════════════════════════════════════════════════════
 # 入口
-# ═══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     args = parse_runtime_args()
@@ -649,7 +629,7 @@ if __name__ == "__main__":
     UI_HOST = args.host.strip() or DEFAULT_UI_HOST
     UI_PORT = resolve_launch_port(UI_HOST, args.port, args.auto_port)
 
-    # 依最新 SD_URL 重建 editor，確保連線檢查與生圖 API 目標一致
+    # 依最新 SD_URL 重建 editor，讓連線檢查與生圖目標一致
     editor = PromptEditor(sd_url=SD_URL, output_dir=OUTPUT_DIR)
 
     print("=" * 65)
@@ -663,17 +643,11 @@ if __name__ == "__main__":
     print()
 
     app = build_ui()
-    # queue 設定：
-    #   default_concurrency_limit  — 限制同時執行的請求數，避免堆積
-    #   max_size                   — 佇列上限，超過直接拒絕避免記憶體爆炸
-    #   status_update_rate         — heartbeat 推送頻率（秒），預設 "auto"
-    #                                AI 耗時較長（30-60s）時調高頻率可防止前端誤判斷線
+    # queue 設定：限制併發、控制佇列上限，並提高狀態更新頻率
     app.queue(
         default_concurrency_limit=2,
         max_size=20,
-        # 每 5 秒推送一次服務端心跳；
-        # 再配合 run_edit_and_generate 內的 progress() 主動保活，
-        # 雙重機制確保長時間 AI 運算（30-90s）期間 SSE 不斷線。
+        # 搭配 run_edit_and_generate 的 progress()，維持長任務的 SSE 心跳
         status_update_rate=5,
     )
     app.launch(
@@ -681,11 +655,8 @@ if __name__ == "__main__":
         server_port=UI_PORT,
         inbrowser=True,       # 自動開啟瀏覽器
         show_error=True,
-        allowed_paths=[OUTPUT_DIR],   # 必須！Gradio 6 預設不允許服務外部目錄
-        # strict_cors=False：
-        #   Gradio 6 預設開啟嚴格 Origin 檢查，本機開發時會阻擋圖片載入
-        #   請求導致 ERR_INCOMPLETE_CHUNKED_ENCODING / Connection errored out。
-        #   關閉後允許 same-site 與 localhost 請求正常通過。
+        allowed_paths=[OUTPUT_DIR],   # 允許 Gradio 存取輸出目錄
+        # 關閉嚴格 CORS，避免本機載入圖片時被擋下
         strict_cors=False,
-        max_threads=40,       # 預設 40，確保 ThreadPoolExecutor 並行 AI 請求有足夠的執行緒
+        max_threads=40,       # 讓 ThreadPoolExecutor 有足夠執行緒可用
     )
